@@ -1,0 +1,292 @@
+{% extends 'templates/base.html' %}
+{% load static %}
+{% block main %}
+    <div class="col-md-4 col-xl-3 chat">
+        <div class="card mb-sm-3 mb-md-0 contacts_card">
+
+            <div class="card-header">
+                <div class="input-group">
+                    <input type="text" placeholder="Search..." id="searchInput" class="form-control search">
+                    <div class="input-group-prepend">
+                        <span class="input-group-text search_btn"><i class="fas fa-search"></i></span>
+                    </div>
+                </div>
+            </div>
+
+            {% if chat_rooms %}
+                <div class="card-body contacts_body">
+                    <ul class="contacts">
+                        {% for room in chat_rooms %}
+                            <li class="d-flex justify-content-between">
+                                <a href="{% url 'chat:room' room.slug %}" class="rooms" id="{{ room.room_name }}">
+                                    <div class="d-flex bd-highlight">
+                                    {% with memeberNum=room.members.count %}
+                                        <div class="img_cont">
+                                            {% if room.room_image %}
+                                                <img src="{{ room.room_image.url }}" class="rounded-circle user_img" alt="Icon">
+                                            {% else %}
+                                                <img src="{% static 'chat-icon.png' %}" class="rounded-circle user_img" alt="Icon">
+                                            {% endif %}
+                                                {% if memeberNum > 1 %}
+                                                    <span class="online_icon"></span>
+                                                {% else %}
+                                                    <span class="offline"></span>
+                                                {% endif %}
+                                        </div>
+                                        <div class="user_info">
+                                            <span>{{ room.room_name.capitalize }}</span>
+                                                {% if memeberNum > 1 %}
+                                                    <p>{{ memeberNum }} Members</p>
+                                                {% else %}
+                                                    <p >{{ memeberNum }} Member</p>
+                                                {% endif %}
+                                        </div>
+                                    {% endwith %}
+                                    </div>
+                                </a>
+                                <a href="#" onclick="removeRoom('{{ room.room_name }}', '{{ room.creator.username }}')"
+                                   class="d-flex flex-column justify-content-center text-danger mr-3"
+                                   style="font-size: larger">
+                                    <i class="fas fa-minus"></i>
+                                </a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% else %}
+                <div class="card-body contacts_body d-flex justify-content-center" style="align-items: center">
+                    <div class="d-flex flex-column text-center">
+                        <span class="text-light font-weight-bold" style="font-size: larger">No Room exists</span>
+                        <span class="text-light">Search for a Room or Create a new Room</span>
+                    </div>
+                </div>
+            {% endif %}
+            <div class="card-footer text-center">
+                <a href="#" class="text-warning" id="createRoom">Create new Room<i class="fas fa-plus"></i></a>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // ----------CREATE ROOM
+    let createRoomElement = document.getElementById('createRoom');
+    createRoomElement.addEventListener('click', event => {
+        event.preventDefault();
+        Swal.fire({
+            title: 'Enter your Room name',
+            input: 'text',
+            inputAttributes: {
+                autocapitalize: 'off',
+                required: true,
+            },
+            showCancelButton: true,
+            confirmButtonText: 'Create',
+            showLoaderOnConfirm: true,
+            preConfirm: (name) => {
+                $.ajax({
+                    url: '{% url 'chat:create-room' %}',
+                    type: 'POST',
+                    data: {
+                        'room_name': name,
+                    },
+                    beforeSend: function (xhr) {
+                        xhr.setRequestHeader('X-CSRFToken', '{{ csrf_token }}');
+                    },
+                    success: function (response) {
+                        if (response.status === 200) {
+                            Swal.fire({
+                                position: 'top-start',
+                                icon: 'success',
+                                title: 'Your new room has been created',
+                                showConfirmButton: false,
+                                timer: 1500
+                            }).then(() => {
+                                window.location.reload()
+                            })
+                        } else if (response.status === 409) {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Room Exists',
+                                text: 'Room with this name exists. You can search and join the room',
+                                confirmButtonColor: '#3085d6',
+                            });
+                        } else if (response.status === 400) {
+                            Swal.fire('Something went wrong, Room name didnt received')
+                        }
+                    },
+                    error: function (error) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: error.code,
+                            text: 'Service encountered an error. Please try again. If the error is not resolved, contact support',
+                            confirmButtonColor: '#3085d6',
+                        })
+                        console.log(error)
+                    }
+                })
+            },
+            allowOutsideClick: () => !Swal.isLoading()
+        })
+    });
+
+    // ----------SEARCH ROOM
+    let searchInput = document.getElementById('searchInput');
+    let searchIcon = document.querySelector('.input-group .search_btn');
+    searchInput.addEventListener('keypress', event => {
+        if (event.key === 'Enter') {
+            searchRoom();
+        }
+    });
+    searchIcon.addEventListener('click', searchRoom);
+
+    function searchRoom() {
+        let roomName = searchInput.value;
+        if (roomName) {
+            $.ajax({
+                url: '{% url 'chat:lobby' %}',
+                type: 'POST',
+                data: {
+                    'room_name': roomName,
+                },
+                beforeSend: function (xhr) {
+                    xhr.setRequestHeader('X-CSRFToken', '{{ csrf_token }}');
+                },
+                success: function (response) {
+                    if (response.status === 400) {
+                        showSearchInputError();
+                    } else if (response.status === 404) {
+                        Swal.fire({
+                            icon: 'info',
+                            text: 'There is no room with this name',
+                            confirmButtonColor: '#3085d6',
+                        });
+                        clearSearchInput();
+                    } else if (response.status === 409) {
+                        let room = document.getElementById(`${roomName}`);
+                        clearSearchInput();
+                        room.click();
+                    } else if (response.status === 200) {
+                        Swal.fire({
+                            title: 'Do you want to join?',
+                            text: `Room ${roomName} exists, Do you wanna join?`,
+                            icon: 'warning',
+                            showCancelButton: true,
+                            confirmButtonColor: '#3085d6',
+                            cancelButtonColor: '#d33',
+                            confirmButtonText: 'Yes, Join!'
+                        }).then((result) => {
+                            if (result.isConfirmed) {
+                                $.ajax({
+                                    url: '{% url "chat:join-room" %}',
+                                    type: 'POST',
+                                    data: {
+                                        'room_name': roomName,
+                                    },
+                                    beforeSend: function (xhr) {
+                                        xhr.setRequestHeader('X-CSRFToken', '{{ csrf_token }}');
+                                    },
+                                    success: function (response) {
+                                        if (response.status === 200) {
+                                            window.location.reload();
+                                            clearSearchInput();
+                                        } else if (response.status === 400) {
+                                            Swal.fire({
+                                                text: 'Somethon went Wrong, try again!',
+                                                confirmButtonColor: '#3085d6',
+                                            });
+                                            clearSearchInput();
+                                        }
+                                    },
+                                    error: function (error) {
+                                        Swal.fire({
+                                            icon: 'error',
+                                            title: error.code,
+                                            text: 'Service encountered an error. Please try again. If the error is not resolved, contact support',
+                                            confirmButtonColor: '#3085d6',
+                                        });
+                                        clearSearchInput();
+                                        console.log(error)
+                                    },
+                                })
+                            } else {
+                                clearSearchInput()
+                            }
+                        })
+                    }
+                },
+                error: function (error) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: error.code,
+                        text: 'Service encountered an error. Please try again. If the error is not resolved, contact support',
+                        confirmButtonColor: '#3085d6',
+                    });
+                    clearSearchInput();
+                    console.log(error)
+                },
+            })
+        } else {
+            showSearchInputError();
+        }
+    }
+
+    function showSearchInputError() {
+        let inputGroup = searchInput.parentElement;
+        inputGroup.style.border = '2px solid red';
+        inputGroup.style.borderRadius = '17px';
+    }
+
+    function clearSearchInput() {
+        searchInput.value = '';
+        searchInput.focus();
+    }
+
+    // ----------REMOVE ROOM
+    function removeRoom(roomName, roomCreator) {
+        let text;
+        let user = '{{ request.user.username }}';
+        if (roomCreator === user){
+            text = `Do you want to delete ${roomName} room ?`
+        } else {
+            text = `Do you want to exit ${roomName} room ?`;
+        }
+        Swal.fire({
+            title: 'Are you sure ?',
+            text: text,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#3085d6',
+            cancelButtonColor: '#d33',
+            confirmButtonText: 'Yes, Exit!',
+        }).then((result) => {
+            if (result.isConfirmed) {
+                $.ajax({
+                    url: '{% url "chat:remove-room" %}',
+                    data: {
+                        'room_name': roomName
+                    },
+                    success: function (response) {
+                        if (response.status === 200) {
+                            window.location.reload();
+                        } else if (response.status === 400) {
+                            Swal.fire({
+                                text: 'Somethon went Wrong, try again!',
+                                confirmButtonColor: '#3085d6',
+                            });
+                        }
+                    },
+                    error: function (error) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: error.code,
+                            text: 'Service encountered an error. Please try again. If the error is not resolved, contact support',
+                            confirmButtonColor: '#3085d6',
+                        });
+                        console.log(error)
+                    }
+                })
+            }
+        })
+    }
+</script>
+{% endblock %}
